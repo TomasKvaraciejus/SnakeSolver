@@ -5,6 +5,10 @@
 #include <string>
 #include <stack>
 #include <unordered_map>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QGraphicsScene>
+#include <QtWidgets/QGraphicsRectItem>
+#include <QtWidgets/QGraphicsView>
 
 struct coord
 {
@@ -94,10 +98,31 @@ class Compare
 	}
 };
 
+struct gameObject
+{
+	coord pos;
+	QGraphicsRectItem *rect;
+
+	friend bool operator< (const gameObject& a, const gameObject& b)
+	{
+		return (a.pos < b.pos);
+	}
+
+	friend bool operator== (const gameObject& a, const gameObject& b)
+	{
+		return (a.pos == b.pos);
+	}
+
+	friend bool operator!= (const gameObject& a, const gameObject& b)
+	{
+		return !(a == b);
+	}
+};
+
 const int gridSize = 16;
 const int minSnakeLength = 3;
 char grid[gridSize][gridSize]; // game grid, values are: O - empty space, S - snake, A - apple, H - snake head 
-std::queue<coord> snake;
+std::queue<gameObject> snake;
 std::stack<coord> path;
 std::string endMsg = "???";
 
@@ -106,7 +131,7 @@ coord prevUserInput;
 
 bool gameInProgress = true;
 bool playerInControl = false;
-std::vector<coord> applePos;
+std::vector<gameObject> applePos;
 
 void updateScreen();
 void initializeGrid();
@@ -118,8 +143,22 @@ void drawPath(std::stack<coord> path);
 std::stack<coord> snakeSolver();
 std::stack<coord> parsePath(node *q);
 
+QGraphicsRectItem* createRect(QColor color, int size, int x, int y);
+QGraphicsScene* scene;
+const QColor bodyColor{100,200,100,255};
+const QColor headColor{ 100,100,100,255 };
+const QColor appleColor{ 200,100,100,255 };
+
 int main(int argc, char *argv[])
 {
+	QApplication a(argc, argv);
+	scene = new QGraphicsScene();
+	QGraphicsView* view = new QGraphicsView(scene);
+	view->show();
+	view->setFixedSize(gridSize * 50, gridSize * 50);
+	view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
 	srand(time(NULL));
 
 	initializeGrid();
@@ -133,10 +172,13 @@ int main(int argc, char *argv[])
 		getInput();
 		moveSnake();
 		updateScreen();
+		a.processEvents();
 		Sleep(100);
 	}
 
 	std::cout << "snork " << endMsg << "\nscore: " << snake.size();
+
+	return a.exec();
 }
 
 // GAME STATE
@@ -145,8 +187,9 @@ void initializeGrid()
 {
 	memset(grid, ' ', sizeof(grid));
 
-	snake.push(coord(gridSize / 2, gridSize / 2));
-	grid[snake.back().x][snake.back().y] = 'H';
+	snake.push(gameObject{ coord(gridSize / 2, gridSize / 2), createRect(headColor, 48, gridSize / 2, gridSize / 2)});
+	scene->addItem(snake.back().rect);
+	grid[snake.back().pos.x][snake.back().pos.y] = 'H';
 
 	generateApple(3);
 }
@@ -158,8 +201,8 @@ void moveSnake()
 
 	if (playerInControl)
 	{
-		nextX = clampValue(snake.back().x + userInput.x);
-		nextY = clampValue(snake.back().y + userInput.y);
+		nextX = clampValue(snake.back().pos.x + userInput.x);
+		nextY = clampValue(snake.back().pos.y + userInput.y);
 	}
 	else
 	{
@@ -168,12 +211,16 @@ void moveSnake()
 		path.pop();
 	}
 
-	grid[snake.back().x][snake.back().y] = 'S';
-	snake.push(coord(nextX, nextY));
+	grid[snake.back().pos.x][snake.back().pos.y] = 'S';
+	snake.back().rect->setBrush(bodyColor);
+	snake.push(gameObject{ coord(nextX, nextY), createRect(headColor, 48, nextX, nextY)});
+	scene->addItem(snake.back().rect);
 
 	if (grid[nextX][nextY] == 'A')
 	{
-		applePos.erase(std::find(applePos.begin(), applePos.end(), coord(nextX, nextY)));
+		gameObject o = *std::find(applePos.begin(), applePos.end(), gameObject{ coord(nextX, nextY), new QGraphicsRectItem() });
+		delete(o.rect);
+		applePos.erase(std::find(applePos.begin(), applePos.end(), gameObject{ coord(nextX, nextY), new QGraphicsRectItem()}));
 		generateApple(1);
 		if (!playerInControl)
 		{
@@ -192,7 +239,8 @@ void moveSnake()
 	}
 	else if(snake.size() > minSnakeLength)
 	{
-		grid[snake.front().x][snake.front().y] = ' ';
+		grid[snake.front().pos.x][snake.front().pos.y] = ' ';
+		delete(snake.front().rect);
 		snake.pop();
 	}
 
@@ -221,14 +269,24 @@ void generateApple(int amount)
 			x = rand() % gridSize;
 			y = rand() % gridSize;
 		} while (grid[x][y] == 'S' || grid[x][y] == 'H' || grid[x][y] == 'A');
-		applePos.push_back(coord(x, y));
+		applePos.push_back(gameObject{ coord(x, y), createRect(appleColor, 48, x, y)});
+		scene->addItem(applePos.back().rect);
 		grid[x][y] = 'A';
 	}
 
-	std::sort(applePos.begin(), applePos.end(), ([](coord a, coord b) { return (a.absDistance(snake.back()) < b.absDistance(snake.back())); }));
+	std::sort(applePos.begin(), applePos.end(), ([](gameObject a, gameObject b) { return (a.pos.absDistance(snake.back().pos) < b.pos.absDistance(snake.back().pos)); }));
 }
  
 // UI
+
+/**/QGraphicsRectItem* createRect(QColor color, int size, int x, int y)
+{
+	QGraphicsRectItem* rect = new QGraphicsRectItem();
+	rect->setRect(x * 50, y * 50, size, size);
+	rect->setBrush(Qt::SolidPattern);
+	rect->setBrush(color);
+	return rect;
+}
 
 void updateScreen()
 {
@@ -291,14 +349,14 @@ void drawPath(std::stack<coord> path)
 std::stack<coord> snakeSolver()
 {
 	std::unordered_map<coord, int> gameStates;
-	std::queue<coord> _snake = snake;
+	std::queue<gameObject> _snake = snake;
 	for (int i = 0; i < snake.size(); ++i)
 	{
-		gameStates.emplace(_snake.front(), i);
+		gameStates.emplace(_snake.front().pos, i);
 		_snake.pop();
 	}
 
-	coord start = snake.back(), end;
+	coord start = snake.back().pos, end;
 	int h = 0;
 
 	for (int appleIndex = 0; appleIndex < applePos.size(); ++appleIndex)
@@ -312,7 +370,7 @@ std::stack<coord> snakeSolver()
 
 		open.emplace(q);
 
-		end = applePos[appleIndex];
+		end = applePos[appleIndex].pos;
 		while (!open.empty())
 		{
 			q = open.top();
